@@ -69,10 +69,14 @@ func (g *PathLockerGroup) LockTimeout(timeout time.Duration, paths ...string) bo
 			var b bool
 			if i == len(items)-1 {
 				// final node, use write lock
-				b = LockWithTimer(m, timer)
+				c1 := make(chan bool, 1)
+				c2 := make(chan bool, 1)
+				b = LockWithTimer(m, timer, c1, c2)
 			} else {
 				// ntermediate node, use read lock
-				b = LockWithTimer(m.RLocker(), timer)
+				c1 := make(chan bool, 1)
+				c2 := make(chan bool, 1)
+				b = LockWithTimer(m.RLocker(), timer, c1, c2)
 			}
 
 			if !b {

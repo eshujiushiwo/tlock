@@ -181,14 +181,32 @@ func (a *App) LockTimeout(tp string, timeout time.Duration, names []string) (uin
 	var b bool
 	var err error
 	tp = strings.ToLower(tp)
+	c1 := make(chan bool, 1)
+	c2 := make(chan bool, 1)
 	switch tp {
 	case KeyLockType:
-		b, err = a.keyLockerGroup.LockTimeout(timeout, names...), nil
+
+		go a.keyLockerGroup.LockTimeout(c1, c2, timeout, names...)
+
 	case PathLockType:
 		b, err = a.pathLockerGroup.LockTimeout(timeout, names...), nil
 	default:
 		return 0, fmt.Errorf("invalid lock type %s", tp)
 	}
+
+	select {
+	case <-c1:
+		id := a.genLockID()
+		l := newLockInfo(id, tp, names)
+
+		a.locksMutex.Lock()
+		a.locks[id] = l
+		a.locksMutex.Unlock()
+		return id, nil
+	case <-c2:
+		return 0, errLockTimeout
+	}
+
 	if !b {
 		return 0, errLockTimeout
 	} else if err != nil {

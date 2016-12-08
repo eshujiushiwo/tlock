@@ -11,7 +11,7 @@ import (
 )
 
 var addr = flag.String("addr", "127.0.0.1:13000", "http listen address")
-var httpAddr = flag.String("http_addr", "", "http listen address")
+var httpAddr = flag.String("http_addr", "127.0.0.1:14000", "http listen address")
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())

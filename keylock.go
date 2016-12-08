@@ -29,13 +29,13 @@ func (g *KeyLockerGroup) getSet(key string) *refLockSet {
 	return g.set[index]
 }
 
-func (g *KeyLockerGroup) Lock(keys ...string) {
-	// use a very long timeout
-	b := g.LockTimeout(InfiniteTimeout, keys...)
-	if !b {
-		panic("Wait lock too long, panic")
-	}
-}
+// func (g *KeyLockerGroup) Lock(keys ...string) {
+// 	// use a very long timeout
+// 	b := g.LockTimeout(InfiniteTimeout, keys...)
+// 	if !b {
+// 		panic("Wait lock too long, panic")
+// 	}
+// }
 
 func removeDuplicatedItems(keys ...string) []string {
 	if len(keys) <= 1 {
@@ -55,7 +55,7 @@ func removeDuplicatedItems(keys ...string) []string {
 	return p
 }
 
-func (g *KeyLockerGroup) LockTimeout(timeout time.Duration, keys ...string) bool {
+func (g *KeyLockerGroup) LockTimeout(ch1 chan bool, ch2 chan bool, timeout time.Duration, keys ...string) bool {
 	if len(keys) == 0 {
 		panic("empty keys, panic")
 	}
@@ -74,15 +74,35 @@ func (g *KeyLockerGroup) LockTimeout(timeout time.Duration, keys ...string) bool
 	for _, key := range keys {
 		s := g.getSet(key)
 		m := s.Get(key)
-		b := LockWithTimer(m, timer)
-		if !b {
-			s.Put(key, m)
-			g.Unlock(keys[0:grapNum]...)
-			return false
-		} else {
+		//	b := LockWithTimer(m, timer)
+		c1 := make(chan bool, 1)
+		c2 := make(chan bool, 1)
+		go LockWithTimer(m, timer, c1, c2)
+
+		select {
+		case <-c1:
+			fmt.Println("999")
 			grapNum++
+
+		case <-timer.C:
+			// s.Put(key, m)
+			// g.Unlock(keys[0:grapNum]...)
+			// fmt.Println("2")
+			fmt.Println("8080")
+			ch2 <- true
+			return false
 		}
+
+		// if !b {
+		// 	s.Put(key, m)
+		// 	g.Unlock(keys[0:grapNum]...)
+		// 	fmt.Println("2")
+		// 	return false
+		// } else {
+		// 	grapNum++
+		// }
 	}
+	ch1 <- true
 	return true
 }
 

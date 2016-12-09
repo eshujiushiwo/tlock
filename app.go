@@ -2,6 +2,7 @@ package tlock
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -102,6 +103,7 @@ func (a *App) StartHTTP(addr string) error {
 }
 
 func (a *App) StartRESP(addr string) error {
+	var ctx context.Context
 	a.m.Lock()
 	defer a.m.Unlock()
 
@@ -121,7 +123,7 @@ func (a *App) StartRESP(addr string) error {
 				return
 			}
 
-			go a.handleRESP(conn)
+			go a.handleRESP(ctx, conn)
 		}
 
 	}()
@@ -167,59 +169,62 @@ func (a *App) genLockID() uint64 {
 }
 
 // Lock and returns a lock id, you must use this id to unlock
-func (a *App) Lock(tp string, names []string) (uint64, error) {
-	id, err := a.LockTimeout(tp, InfiniteTimeout, names)
-	return id, err
-}
+// func (a *App) Lock(tp string, names []string) (uint64, error) {
+// 	id, err := a.LockTimeout(tp, InfiniteTimeout, names)
+// 	return id, err
+// }
 
 // Lock with timeout and returns a lock id, you must use this id to unlock
-func (a *App) LockTimeout(tp string, timeout time.Duration, names []string) (uint64, error) {
+func (a *App) LockTimeout(ctx context.Context, chn chan uint64, errs chan error, tp string, timeout time.Duration, names []string) {
+
 	if len(names) == 0 {
-		return 0, fmt.Errorf("empty lock names")
+		errs <- fmt.Errorf("empty lock names")
+
 	}
 
-	var b bool
-	var err error
+	ctxl, _ := context.WithTimeout(ctx, timeout)
+
 	tp = strings.ToLower(tp)
 	c1 := make(chan bool, 1)
 	c2 := make(chan bool, 1)
 	switch tp {
 	case KeyLockType:
+		a.keyLockerGroup.LockTimeout(ctxl, c1, c2, timeout, names...)
 
-		go a.keyLockerGroup.LockTimeout(c1, c2, timeout, names...)
-
-	case PathLockType:
-		b, err = a.pathLockerGroup.LockTimeout(timeout, names...), nil
 	default:
-		return 0, fmt.Errorf("invalid lock type %s", tp)
+		fmt.Errorf("invalid lock type %s", tp)
 	}
 
 	select {
 	case <-c1:
+
 		id := a.genLockID()
 		l := newLockInfo(id, tp, names)
 
 		a.locksMutex.Lock()
 		a.locks[id] = l
 		a.locksMutex.Unlock()
-		return id, nil
+
+		chn <- id
+
+		select {
+		case <-ctx.Done():
+			fmt.Println("yoyoyo")
+			a.Unlock(id)
+		}
+
 	case <-c2:
-		return 0, errLockTimeout
+		errs <- errLockTimeout
+
 	}
 
-	if !b {
-		return 0, errLockTimeout
-	} else if err != nil {
-		return 0, err
-	}
+	// id := a.genLockID()
+	// l := newLockInfo(id, tp, names)
 
-	id := a.genLockID()
-	l := newLockInfo(id, tp, names)
+	// a.locksMutex.Lock()
+	// a.locks[id] = l
+	// a.locksMutex.Unlock()
 
-	a.locksMutex.Lock()
-	a.locks[id] = l
-	a.locksMutex.Unlock()
-	return id, nil
 }
 
 func (a *App) Unlock(id uint64) error {
@@ -284,7 +289,8 @@ func (a *App) dumpLockNames() []byte {
 
 // lock name1, name2, ... [TYPE key] [TIMEOUT 60]
 // unlock id
-func (a *App) handleRESP(c net.Conn) {
+func (a *App) handleRESP(ctx context.Context, c net.Conn) {
+	errs := make(chan error, 1)
 	conn, err := goredis.NewConn(c)
 	if err != nil {
 		c.Close()
@@ -314,16 +320,17 @@ func (a *App) handleRESP(c net.Conn) {
 		args = args[1:]
 		switch cmd {
 		case "LOCK":
+			c1 := make(chan uint64, 1)
 			tp, names, timeout, err := a.parseRESPLock(args)
 			if err != nil {
 				conn.SendValue(err)
 			} else {
-				id, err := a.LockTimeout(tp, timeout, names)
+				a.LockTimeout(ctx, c1, errs, tp, timeout, names)
 				if err != nil {
 					conn.SendValue(err)
 				} else {
-					grapLockIDs[id] = struct{}{}
-					conn.SendValue([]byte(strconv.FormatUint(id, 10)))
+					//grapLockIDs[id] = struct{}{}
+					//	conn.SendValue([]byte(strconv.FormatUint(id, 10)))
 				}
 			}
 		case "UNLOCK":
@@ -401,6 +408,11 @@ func (a *App) newLockHandler() *lockHandler {
 // Lock type supports key and path, the default is key
 // List locks: Get  /lock
 func (h *lockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var (
+		ctx context.Context
+		//cancel context.CancelFunc
+	)
+	errs := make(chan error, 1)
 	switch r.Method {
 	case "GET":
 		buf := h.a.dumpLockNames()
@@ -408,6 +420,7 @@ func (h *lockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Write(buf)
 		return
 	case "POST", "PUT":
+
 		names := strings.Split(r.FormValue("names"), ",")
 		if len(names) == 0 {
 			w.WriteHeader(http.StatusBadRequest)
@@ -420,22 +433,36 @@ func (h *lockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if timeout <= 0 {
 			timeout = 60
 		}
+		cccc := time.Duration(timeout) * time.Second
+		ctx, _ = context.WithTimeout(context.Background(), cccc)
+
+		fmt.Println("i`m timeout", cccc)
 		tp := strings.ToLower(r.FormValue("type"))
+
 		if len(tp) == 0 {
 			tp = "key"
 		}
+		chn := make(chan uint64, 1)
+		go func() {
+			h.a.LockTimeout(ctx, chn, errs, tp, time.Duration(timeout)*time.Second, names)
+		}()
 
-		id, err := h.a.LockTimeout(tp, time.Duration(timeout)*time.Second, names)
-		if err != nil && err != errLockTimeout {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(err.Error()))
-		} else if err == errLockTimeout {
-			w.WriteHeader(http.StatusRequestTimeout)
-			w.Write([]byte("Lock timeout"))
-		} else {
+		select {
+		case id := <-chn:
+
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(strconv.FormatUint(id, 10)))
+		case err := <-errs:
+
+			if err != nil && err != errLockTimeout {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(err.Error()))
+			} else if err == errLockTimeout {
+				w.WriteHeader(http.StatusRequestTimeout)
+				w.Write([]byte("Lock timeout"))
+			}
 		}
+
 	case "DELETE":
 		id, err := strconv.ParseUint(r.FormValue("id"), 10, 64)
 		if err != nil {
@@ -456,4 +483,5 @@ func (h *lockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	//	defer cancel()
 }

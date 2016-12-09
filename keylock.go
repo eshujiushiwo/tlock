@@ -1,6 +1,7 @@
 package tlock
 
 import (
+	"context"
 	"fmt"
 	"hash/crc32"
 	"sort"
@@ -55,7 +56,7 @@ func removeDuplicatedItems(keys ...string) []string {
 	return p
 }
 
-func (g *KeyLockerGroup) LockTimeout(ch1 chan bool, ch2 chan bool, timeout time.Duration, keys ...string) bool {
+func (g *KeyLockerGroup) LockTimeout(ctx context.Context, ch1 chan bool, ch2 chan bool, timeout time.Duration, keys ...string) {
 	if len(keys) == 0 {
 		panic("empty keys, panic")
 	}
@@ -67,43 +68,43 @@ func (g *KeyLockerGroup) LockTimeout(ch1 chan bool, ch2 chan bool, timeout time.
 	sort.Strings(keys)
 
 	timer := time.NewTimer(timeout)
+	fmt.Println(timeout)
 	defer timer.Stop()
 
 	grapNum := 0
 
 	for _, key := range keys {
+		//fmt.Println("cccccc", key)
 		s := g.getSet(key)
 		m := s.Get(key)
 		//	b := LockWithTimer(m, timer)
 		c1 := make(chan bool, 1)
 		c2 := make(chan bool, 1)
-		go LockWithTimer(m, timer, c1, c2)
+		c3 := make(chan bool, 1)
+
+		go LockWithTimer(ctx, m, timer, c1, c2, c3)
 
 		select {
 		case <-c1:
-			fmt.Println("999")
+			fmt.Println("111")
 			grapNum++
 
-		case <-timer.C:
-			// s.Put(key, m)
-			// g.Unlock(keys[0:grapNum]...)
-			// fmt.Println("2")
-			fmt.Println("8080")
+		case <-c2:
+			fmt.Println("123")
 			ch2 <- true
-			return false
+			return
+
 		}
 
-		// if !b {
-		// 	s.Put(key, m)
-		// 	g.Unlock(keys[0:grapNum]...)
-		// 	fmt.Println("2")
-		// 	return false
-		// } else {
-		// 	grapNum++
-		// }
 	}
+
 	ch1 <- true
-	return true
+	// go func() {}()
+	// select {
+	// case <-ctx.Done():
+	// 	fmt.Println("yeah")
+
+	// }
 }
 
 func (g *KeyLockerGroup) Unlock(keys ...string) {

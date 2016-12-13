@@ -13,8 +13,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/siddontang/goredis"
 )
 
 var errLockTimeout = errors.New("lock timeout")
@@ -102,34 +100,6 @@ func (a *App) StartHTTP(addr string) error {
 	return nil
 }
 
-func (a *App) StartRESP(addr string) error {
-	var ctx context.Context
-	a.m.Lock()
-	defer a.m.Unlock()
-
-	var err error
-	a.respListener, err = net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
-
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-
-		for {
-			conn, err := a.respListener.Accept()
-			if err != nil {
-				return
-			}
-
-			go a.handleRESP(ctx, conn)
-		}
-
-	}()
-	return nil
-}
-
 func (a *App) Close() {
 	a.m.Lock()
 	defer a.m.Unlock()
@@ -150,14 +120,6 @@ func (a *App) HTTPAddr() net.Addr {
 		return nil
 	} else {
 		return a.httpListener.Addr()
-	}
-}
-
-func (a *App) RESPAddr() net.Addr {
-	if a.respListener == nil {
-		return nil
-	} else {
-		return a.respListener.Addr()
 	}
 }
 
@@ -217,13 +179,6 @@ func (a *App) LockTimeout(ctx context.Context, chn chan uint64, errs chan error,
 		errs <- errLockTimeout
 
 	}
-
-	// id := a.genLockID()
-	// l := newLockInfo(id, tp, names)
-
-	// a.locksMutex.Lock()
-	// a.locks[id] = l
-	// a.locksMutex.Unlock()
 
 }
 
@@ -285,110 +240,6 @@ func (a *App) dumpLockNames() []byte {
 	}
 
 	return buf.Bytes()
-}
-
-// lock name1, name2, ... [TYPE key] [TIMEOUT 60]
-// unlock id
-func (a *App) handleRESP(ctx context.Context, c net.Conn) {
-	errs := make(chan error, 1)
-	conn, err := goredis.NewConn(c)
-	if err != nil {
-		c.Close()
-		return
-	}
-
-	grapLockIDs := make(map[uint64]struct{})
-
-	defer func() {
-		conn.Close()
-		for id, _ := range grapLockIDs {
-			a.Unlock(id)
-		}
-	}()
-
-	for {
-		args, err := conn.ReceiveRequest()
-		if err != nil {
-			return
-		}
-		if len(args) < 1 {
-			conn.SendValue(fmt.Errorf("empty command"))
-			continue
-		}
-
-		cmd := strings.ToUpper(string(args[0]))
-		args = args[1:]
-		switch cmd {
-		case "LOCK":
-			c1 := make(chan uint64, 1)
-			tp, names, timeout, err := a.parseRESPLock(args)
-			if err != nil {
-				conn.SendValue(err)
-			} else {
-				a.LockTimeout(ctx, c1, errs, tp, timeout, names)
-				if err != nil {
-					conn.SendValue(err)
-				} else {
-					//grapLockIDs[id] = struct{}{}
-					//	conn.SendValue([]byte(strconv.FormatUint(id, 10)))
-				}
-			}
-		case "UNLOCK":
-			id, err := a.parseRESPUnlock(args)
-			if err != nil {
-				conn.SendValue(err)
-			} else {
-				err = a.Unlock(id)
-				if err != nil {
-					conn.SendValue(err)
-				} else {
-					delete(grapLockIDs, id)
-					conn.SendValue("OK")
-				}
-			}
-		default:
-			conn.SendValue(fmt.Errorf("invalid command %s", cmd))
-		}
-	}
-}
-
-func (a *App) parseRESPLock(args [][]byte) (tp string, names []string, timeout time.Duration, err error) {
-	tp = KeyLockType
-	timeout = 60 * time.Second
-
-	names = make([]string, 0, len(args))
-
-	for i := 0; i < len(args); i++ {
-		arg := string(args[i])
-		s := strings.ToUpper(arg)
-		if s == "TYPE" && i < len(args) {
-			tp = strings.ToLower(string(args[i+1]))
-			i++
-		} else if s == "TIMEOUT" && i < len(args) {
-			var t uint64
-			t, err = strconv.ParseUint(string(args[i+1]), 10, 64)
-			if err != nil {
-				return
-			}
-			if t == 0 {
-				t = 60
-			}
-
-			timeout = time.Duration(t) * time.Second
-			i++
-		} else {
-			names = append(names, arg)
-		}
-	}
-	return
-}
-
-func (a *App) parseRESPUnlock(args [][]byte) (id uint64, err error) {
-	if len(args) != 1 {
-		return 0, fmt.Errorf("empty unlock id")
-	}
-
-	return strconv.ParseUint(string(args[0]), 10, 64)
 }
 
 type lockHandler struct {
@@ -465,6 +316,8 @@ func (h *lockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case "DELETE":
 		id, err := strconv.ParseUint(r.FormValue("id"), 10, 64)
+		id1 := r.FormValue("id")
+		fmt.Println(id1)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(err.Error()))

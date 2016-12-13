@@ -74,10 +74,10 @@ func (g *KeyLockerGroup) LockTimeout(ctx context.Context, ch1 chan bool, ch2 cha
 	grapNum := 0
 
 	for _, key := range keys {
-		//fmt.Println("cccccc", key)
+
 		s := g.getSet(key)
 		m := s.Get(key)
-		//	b := LockWithTimer(m, timer)
+
 		c1 := make(chan bool, 1)
 		c2 := make(chan bool, 1)
 		c3 := make(chan bool, 1)
@@ -99,12 +99,7 @@ func (g *KeyLockerGroup) LockTimeout(ctx context.Context, ch1 chan bool, ch2 cha
 	}
 
 	ch1 <- true
-	// go func() {}()
-	// select {
-	// case <-ctx.Done():
-	// 	fmt.Println("yeah")
 
-	// }
 }
 
 func (g *KeyLockerGroup) Unlock(keys ...string) {

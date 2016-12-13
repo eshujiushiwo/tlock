@@ -40,17 +40,6 @@ func LockWithTimer(ctx context.Context, m sync.Locker, timer *time.Timer, c1 cha
 
 	case <-done:
 		c1 <- true
-		// go func() {
-
-		// 	if atomic.SwapInt32(decided, 1) == 1 {
-		// 		fmt.Println("bibibibibi")
-		// 	}
-		// }()
-		// select {
-		// case <-ctx.Done():
-		// 	fmt.Println("acfun")
-		// 	c3 <- true
-		// }
 
 	}
 

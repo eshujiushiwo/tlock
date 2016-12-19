@@ -1,17 +1,23 @@
 package tlock
 
 import (
+	"fmt"
 	"sync"
 )
 
 type refLock struct {
 	sync.RWMutex
-	ref int
+	ref     int
+	workers []*worker
 }
-
+type worker struct {
+	name   string
+	source chan interface{}
+}
 type refLockSet struct {
 	sync.Mutex
-	set map[string]*refLock
+	set     map[string]*refLock
+	workers []*worker
 }
 
 func newRefLockSet() *refLockSet {
@@ -29,6 +35,8 @@ func (s *refLockSet) Get(key string) *refLock {
 	v, ok := s.set[key]
 	if ok {
 		v.ref++
+
+		s.workers = append(s.workers, &worker{})
 	} else {
 		v = &refLock{ref: 1}
 
@@ -51,7 +59,9 @@ func (s *refLockSet) Put(key string, v *refLock) {
 	defer s.Unlock()
 
 	v.ref--
+	fmt.Println("jjjj", len(s.workers))
 	if v.ref <= 0 {
+
 		delete(s.set, key)
 	}
 }

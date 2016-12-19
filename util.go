@@ -14,20 +14,15 @@ import (
 // 	return LockWithTimer(m, timer)
 // }
 
-func LockWithTimer(ctx context.Context, m sync.Locker, timer *time.Timer, c1 chan bool, c2 chan bool, c3 chan bool) {
+func LockWithTimer(ctx context.Context, m sync.Locker, timer *time.Timer, c1 chan bool, c2 chan bool) {
 	done := make(chan bool, 1)
 	decided := new(int32)
 	go func() {
 
 		m.Lock()
 
-		if atomic.SwapInt32(decided, 1) == 0 {
-			done <- true
+		done <- true
 
-		} else {
-			// If we already decided the result, and this thread did not win
-			m.Unlock()
-		}
 	}()
 
 	select {
@@ -37,6 +32,7 @@ func LockWithTimer(ctx context.Context, m sync.Locker, timer *time.Timer, c1 cha
 			fmt.Println("acer")
 			c2 <- true
 		}
+		return
 
 	case <-done:
 		c1 <- true

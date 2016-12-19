@@ -51,6 +51,7 @@ func removeDuplicatedItems(keys ...string) []string {
 			m[key] = struct{}{}
 			p = append(p, key)
 		}
+
 	}
 
 	return p
@@ -80,17 +81,16 @@ func (g *KeyLockerGroup) LockTimeout(ctx context.Context, ch1 chan bool, ch2 cha
 
 		c1 := make(chan bool, 1)
 		c2 := make(chan bool, 1)
-		c3 := make(chan bool, 1)
 
-		go LockWithTimer(ctx, m, timer, c1, c2, c3)
+		go LockWithTimer(ctx, m, timer, c1, c2)
 
 		select {
 		case <-c1:
-			fmt.Println("111")
+
 			grapNum++
 
 		case <-c2:
-			fmt.Println("123")
+
 			ch2 <- true
 			return
 
@@ -123,5 +123,7 @@ func (g *KeyLockerGroup) Unlock(keys ...string) {
 		m.Unlock()
 
 		g.getSet(key).Put(key, m)
+
+		fmt.Println("uuuuuuu unlock")
 	}
 }

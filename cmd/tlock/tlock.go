@@ -7,12 +7,13 @@ import (
 	"runtime"
 	"syscall"
 
-	"github.com/siddontang/tlock"
+	"github.com/eshujiushiwo/tlock"
 )
 
 var httpAddr = flag.String("http_addr", "127.0.0.1:14000", "http listen address")
 
 func main() {
+
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	flag.Parse()
 
@@ -33,5 +34,5 @@ func main() {
 
 	<-sc
 
-	a.Close()
+	defer a.Close()
 }

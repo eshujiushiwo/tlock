@@ -2,6 +2,7 @@ package tlock
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -25,13 +26,13 @@ type App struct {
 	httpListener net.Listener
 	respListener net.Listener
 
-	keyLockerGroup  *KeyLockerGroup
-	pathLockerGroup *PathLockerGroup
+	keyLockerGroup *KeyLockerGroup
 
 	locksMutex sync.Mutex
 	locks      map[uint64]*lockInfo
 
 	lockIDCounter uint32
+	source        chan string
 }
 
 type lockInfo struct {
@@ -39,6 +40,7 @@ type lockInfo struct {
 	names      []string
 	tp         string
 	createTime time.Time
+	mylist     *list.List
 }
 
 func newLockInfo(id uint64, tp string, names []string) *lockInfo {
@@ -48,6 +50,7 @@ func newLockInfo(id uint64, tp string, names []string) *lockInfo {
 	l.names = names
 	l.tp = tp
 	l.createTime = time.Now()
+	l.mylist = list.New()
 
 	return l
 }
@@ -70,9 +73,9 @@ func NewApp() *App {
 	a := new(App)
 
 	a.keyLockerGroup = NewKeyLockerGroup()
-	a.pathLockerGroup = NewPathLockerGroup()
 
 	a.locks = make(map[uint64]*lockInfo, 1024)
+	a.source = make(chan string, 1)
 
 	return a
 }
@@ -137,7 +140,7 @@ func (a *App) genLockID() uint64 {
 // }
 
 // Lock with timeout and returns a lock id, you must use this id to unlock
-func (a *App) LockTimeout(ctx context.Context, chn chan uint64, errs chan error, tp string, timeout time.Duration, names []string) {
+func (a *App) LockTimeout(ctx context.Context, chmsg chan string, chn chan uint64, errs chan error, tp string, timeout time.Duration, names []string) {
 
 	if len(names) == 0 {
 		errs <- fmt.Errorf("empty lock names")
@@ -158,6 +161,7 @@ func (a *App) LockTimeout(ctx context.Context, chn chan uint64, errs chan error,
 	}
 
 	select {
+
 	case <-c1:
 
 		id := a.genLockID()
@@ -171,13 +175,29 @@ func (a *App) LockTimeout(ctx context.Context, chn chan uint64, errs chan error,
 
 		select {
 		case <-ctx.Done():
-			fmt.Println("yoyoyo")
+			fmt.Println(id)
+
+			fmt.Println("show up")
+			//a.source <- msg11
+
+			for _, key := range names {
+				for range a.keyLockerGroup.getSet(key).workers {
+					l.mylist.PushBack(1)
+
+				}
+			}
+
 			a.Unlock(id)
+
 		}
 
 	case <-c2:
 		errs <- errLockTimeout
+	case msg := <-a.source:
 
+		fmt.Println("999999999999999")
+		chmsg <- msg
+		return
 	}
 
 }
@@ -198,9 +218,9 @@ func (a *App) Unlock(id uint64) error {
 
 	switch l.tp {
 	case KeyLockType:
+		fmt.Println(l.names)
 		a.keyLockerGroup.Unlock(l.names...)
-	case PathLockType:
-		a.pathLockerGroup.Unlock(l.names...)
+
 	default:
 		return fmt.Errorf("invalid lock type %s", l.tp)
 	}
@@ -263,6 +283,7 @@ func (h *lockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx context.Context
 		//cancel context.CancelFunc
 	)
+
 	errs := make(chan error, 1)
 	switch r.Method {
 	case "GET":
@@ -287,18 +308,22 @@ func (h *lockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		cccc := time.Duration(timeout) * time.Second
 		ctx, _ = context.WithTimeout(context.Background(), cccc)
 
-		fmt.Println("i`m timeout", cccc)
 		tp := strings.ToLower(r.FormValue("type"))
 
 		if len(tp) == 0 {
 			tp = "key"
 		}
 		chn := make(chan uint64, 1)
+		chmsg := make(chan string, 1)
 		go func() {
-			h.a.LockTimeout(ctx, chn, errs, tp, time.Duration(timeout)*time.Second, names)
+			h.a.LockTimeout(ctx, chmsg, chn, errs, tp, time.Duration(timeout)*time.Second, names)
 		}()
 
 		select {
+		case <-chmsg:
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("aaaaa"))
+			return
 		case id := <-chn:
 
 			w.WriteHeader(http.StatusOK)
@@ -336,5 +361,5 @@ func (h *lockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	//	defer cancel()
+	//defer cancel()
 }
